@@ -7,6 +7,8 @@
 #include <cstring>
 #define SDL_MAIN_HANDLED
 #include <SDL2/SDL.h>
+#include <string>     // std::string, std::stoi
+
 
 
 const unsigned int START_ADDRESS = 0x200; // Because rom Memory Starts from 0x200 and ends at 0xFFF
@@ -294,7 +296,7 @@ void Chip8::OP_5xy0()
 void Chip8::OP_6xkk() 
 {
 	uint8_t Vx = (opcode & 0x0F00) >> 8u;
-	uint8_t byte = opcode & 0x00FF;
+	uint8_t byte = opcode & 0x00FFu;
 	registers[Vx] = byte;
 }
 
@@ -302,7 +304,7 @@ void Chip8::OP_7xkk()
 {
 
 	uint8_t Vx = (opcode & 0x0F00) >> 8u;
-	uint8_t byte = opcode & 0x00FF;
+	uint8_t byte = opcode & 0x00FFu;
 
 	registers[Vx] += byte;
 }
@@ -310,9 +312,9 @@ void Chip8::OP_7xkk()
 void Chip8::OP_8xy0() 
 {
 	uint8_t Vx = (opcode & 0x0F00) >> 8u;
-	uint8_t Vy = (opcode & 0x0F00) >> 4u;
+	uint8_t Vy = (opcode & 0x00F0) >> 4u;
 
-	registers[Vx] += registers[Vy];
+	registers[Vx] = registers[Vy];
 }
 
 void Chip8::OP_8xy1() 
@@ -386,26 +388,19 @@ void Chip8::OP_8xy5()
 
 void Chip8::OP_8xy6()
 {
-	uint8_t Vx = (opcode & 0x0F00) >> 8u;
+	uint8_t Vx = (opcode & 0x0F00u) >> 8u;
 
-	if ((registers[Vx] & 0x1u) == 1)
-	{
-		registers[0xF] = 1;
-	}
-	else
-	{
-		registers[0xF] = 0;
-	}
+	// Save LSB in VF
+	registers[0xF] = (registers[Vx] & 0x1u);
 
-	
-	registers[Vx] /= 2;
+	registers[Vx] >>= 1;
 }
 
 
 void Chip8::OP_8xy7()
 {
-	uint8_t Vx = (opcode & 0x0F00) >> 8u;
-	uint8_t Vy = (opcode & 0x00F0) >> 4u;
+	uint8_t Vx = (opcode & 0x0F00u) >> 8u;
+	uint8_t Vy = (opcode & 0x00F0u) >> 4u;
 
 	if (registers[Vy] > registers[Vx])
 	{
@@ -416,26 +411,18 @@ void Chip8::OP_8xy7()
 		registers[0xF] = 0;
 	}
 
-
-	registers[Vx] -= registers[Vy];
+	registers[Vx] = registers[Vy] - registers[Vx];
 }
 
 
 void Chip8::OP_8xyE()
 {
-	uint8_t Vx = (opcode & 0x0F00) >> 8u;
+	uint8_t Vx = (opcode & 0x0F00u) >> 8u;
 
-	if ((registers[Vx] & 0x8u) == 1)
-	{
-		registers[0xF] = 1;
-	}
-	else
-	{
-		registers[0xF] = 0;
-	}
+	// Save MSB in VF
+	registers[0xF] = (registers[Vx] & 0x80u) >> 7u;
 
-
-	registers[Vx] *= 2;
+	registers[Vx] <<= 1;
 }
 
 void Chip8::OP_9xy0()
@@ -630,6 +617,7 @@ void Chip8::OP_Fx0A()
 void Chip8::OP_Fx15()
 {
 	uint8_t Vx = (opcode & 0x0F00) >> 8u;
+	std::cout << "" << std::endl;
 
 	delayTimer = registers[Vx];
 }
@@ -746,7 +734,7 @@ public:
 		SDL_RenderPresent(renderer);
 	}
 
-	bool ProcessInput(uint8_t* keys) 
+	bool ProcessInput(uint8_t* keys)
 	{
 		bool quit = false;
 
@@ -756,13 +744,13 @@ public:
 		{
 			switch (event.type)
 			{
-			case SDL_QUIT: 
+			case SDL_QUIT:
 			{
 				quit = true;
 			} break;
 
 
-			case SDL_KEYDOWN: 
+			case SDL_KEYDOWN:
 			{
 				switch (event.key.keysym.sym)
 				{
@@ -839,6 +827,7 @@ public:
 			} break;
 
 			case SDL_KEYUP:
+			{
 				switch (event.key.keysym.sym)
 				{
 				case SDLK_x:
@@ -905,10 +894,13 @@ public:
 				{
 					keys[0xF] = 0;
 
-				} break;
-			}
-		} break;
-	} 
+				}break;
+			  }
+			}break;
+		  } 
+		}
+		return quit;
+	}
 	
 
 
@@ -921,12 +913,40 @@ private:
 int main(int argc, char* argv[])
 {
 
-	while (true)
+	if (argc != 4)
 	{
-
+		std::cerr << "Usage: " << argv[0] << " <Scale> <Delay> <ROM>\n";
+		std::exit(EXIT_FAILURE);
 	}
 
-    SDL_Quit();
+	int videoScale = std::stoi(argv[1]);
+	int cycleDelay = std::stoi(argv[2]);
+	char const* romFilename = argv[3];
 
+	Platform platform("Chip-8 World", VIDEO_WIDTH * videoScale, VIDEO_HEIGHT * videoScale, VIDEO_WIDTH, VIDEO_HEIGHT);
+
+	Chip8 chip8;
+	chip8.LoadROM(romFilename);
+
+	int videoPitch = sizeof(chip8.graphics[0]) * VIDEO_WIDTH;
+
+	auto lastCycleTime = std::chrono::high_resolution_clock::now();
+	bool quit = false;
+
+	while (!quit)
+	{
+		quit = platform.ProcessInput(chip8.inputKeys);
+
+		auto currentTime = std::chrono::high_resolution_clock::now();
+		float dt = std::chrono::duration<float, std::chrono::milliseconds::period>(currentTime - lastCycleTime).count();
+		if (dt > cycleDelay)
+		{
+			lastCycleTime = currentTime;
+
+			chip8.Cycle();
+
+			platform.update(chip8.graphics, videoPitch);
+		}
+	}
 	return 0;
 }
